@@ -1,20 +1,20 @@
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
+
+    const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
 
     const exe = b.addExecutable("zdb", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.entitlements = "resources/Info.plist";
     exe.install();
+
+    const exe_opts = b.addOptions();
+    exe.addOptions("build_options", exe_opts);
+    exe_opts.addOption(bool, "enable_logging", enable_logging);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

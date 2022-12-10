@@ -3,8 +3,13 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 const mem = std.mem;
 
+const Zdb = @import("Zdb.zig");
+
 const usage =
-    \\zdb [file]
+    \\zdb [file] [options]
+    \\
+    \\General options:
+    \\ --debug-log [scope]     Enable logging of [scope] logs
 ;
 
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
@@ -83,14 +88,15 @@ fn doMain(args: []const []const u8) !void {
     var args_iter = ArgsIterator{ .args = args };
 
     while (args_iter.next()) |arg| {
-        try argv.append(arg);
+        if (mem.eql(u8, arg, "--debug-log")) {
+            const scope = args_iter.next() orelse fatal("expected log scope after {s}", .{arg});
+            try log_scopes.append(scope);
+        } else try argv.append(arg);
     }
 
-    var child = std.ChildProcess.init(argv.items, arena);
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-    child.disable_aslr = true;
-
-    _ = try child.spawnAndWait();
+    var zdb = Zdb.init(gpa, .{
+        .debugee_args = argv.items,
+    });
+    defer zdb.deinit();
+    try zdb.loop();
 }

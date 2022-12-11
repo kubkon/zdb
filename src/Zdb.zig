@@ -5,52 +5,12 @@ const mem = std.mem;
 const log = std.log.scoped(.zdb);
 
 const Allocator = mem.Allocator;
+const Debuggee = @import("Debuggee.zig");
 
 allocator: Allocator,
 options: Options,
 
 debuggee: ?Debuggee = null,
-
-const Debuggee = struct {
-    arena: std.heap.ArenaAllocator,
-    process: std.ChildProcess,
-    task: std.os.darwin.MachTask,
-
-    fn spawn(gpa: Allocator, args: []const []const u8) !Debuggee {
-        var arena = std.heap.ArenaAllocator.init(gpa);
-        var process = std.ChildProcess.init(args, arena.allocator());
-        process.stdin_behavior = .Inherit;
-        process.stdout_behavior = .Inherit;
-        process.stderr_behavior = .Inherit;
-        process.disable_aslr = true;
-        process.start_suspended = true;
-
-        try process.spawn();
-
-        log.debug("Debuggee PID: {d}", .{process.pid});
-
-        const task = try std.os.darwin.machTaskForPid(process.pid);
-        if (task.isValid()) {}
-
-        try std.os.ptrace.ptrace(std.os.darwin.PT_ATTACHEXC, process.pid);
-
-        log.debug("Debuggee Mach task: {any}", .{task});
-
-        return Debuggee{
-            .arena = arena,
-            .process = process,
-            .task = task,
-        };
-    }
-
-    // fn @"continue"(dbg: Debuggee) !void {
-    //     try ptrace.ptrace(ptrace.PT_CONTINUE, dbg.process.pid);
-    // }
-
-    fn kill(dbg: Debuggee) void {
-        std.os.ptrace.ptrace(std.os.darwin.PT_KILL, dbg.process.pid) catch {};
-    }
-};
 
 pub const Options = struct {
     debuggee_args: []const []const u8,
@@ -65,7 +25,7 @@ pub fn init(allocator: Allocator, options: Options) Zdb {
 
 pub fn deinit(zdb: *Zdb) void {
     if (zdb.debuggee) |*debuggee| {
-        debuggee.arena.deinit();
+        debuggee.deinit();
     }
 }
 

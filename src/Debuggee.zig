@@ -45,6 +45,8 @@ pub fn spawn(gpa: Allocator, args: []const []const u8) !Debuggee {
         dbg.exception_port = try self_task.allocatePort(darwin.MACH_PORT_RIGHT.RECEIVE);
 
         log.debug("allocated exception port: {any}", .{dbg.exception_port});
+
+        try self_task.insertRight(dbg.exception_port, darwin.MACH_MSG_TYPE.MAKE_SEND);
     }
 
     try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, dbg.process.pid);

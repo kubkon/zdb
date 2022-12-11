@@ -10,60 +10,7 @@ arena: std.heap.ArenaAllocator,
 process: std.ChildProcess,
 task: darwin.MachTask,
 exception_port: darwin.MachTask,
-exc_port_info: PortInfo,
-
-const PortInfo = struct {
-    mask: darwin.exception_mask_t,
-    masks: [darwin.EXC_TYPES_COUNT]darwin.exception_mask_t,
-    ports: [darwin.EXC_TYPES_COUNT]darwin.mach_port_t,
-    behaviors: [darwin.EXC_TYPES_COUNT]darwin.exception_behavior_t,
-    flavors: [darwin.EXC_TYPES_COUNT]darwin.thread_state_flavor_t,
-    count: darwin.mach_msg_type_number_t,
-
-    fn save(task: darwin.MachTask) !PortInfo {
-        var info = PortInfo{
-            .mask = darwin.EXC_MASK_ALL,
-            .masks = undefined,
-            .ports = undefined,
-            .behaviors = undefined,
-            .flavors = undefined,
-            .count = 0,
-        };
-        info.count = info.ports.len / @sizeOf(darwin.mach_port_t);
-
-        switch (darwin.getKernError(darwin.task_get_exception_ports(
-            task.port,
-            info.mask,
-            &info.masks,
-            &info.count,
-            &info.ports,
-            &info.behaviors,
-            &info.flavors,
-        ))) {
-            .SUCCESS => return info,
-            else => return error.FailedToSavePortInfo,
-        }
-    }
-
-    fn restore(info: *PortInfo, task: darwin.MachTask) !void {
-        if (info.count > 0) {
-            var i: usize = 0;
-            while (i < info.count) : (i += 1) {
-                switch (darwin.getKernError(darwin.task_set_exception_ports(
-                    task.port,
-                    info.masks[i],
-                    info.ports[i],
-                    info.behaviors[i],
-                    info.flavors[i],
-                ))) {
-                    .SUCCESS => {},
-                    else => return error.FailedToRestorePortInfo,
-                }
-            }
-        }
-        info.count = 0;
-    }
-};
+exc_port_info: darwin.MachTask.PortInfo,
 
 pub fn deinit(dbg: *Debuggee) void {
     dbg.arena.deinit();
@@ -92,20 +39,7 @@ pub fn spawn(gpa: Allocator, args: []const []const u8) !Debuggee {
     try dbg.process.spawn();
     log.debug("PID: {d}", .{dbg.process.pid});
 
-    dbg.task = try darwin.machTaskForPid(dbg.process.pid);
-    log.debug("Mach task: {any}", .{dbg.task});
-
-    if (dbg.task.isValid()) {
-        const self_task = darwin.machTaskForSelf();
-        dbg.exception_port = try self_task.allocatePort(darwin.MACH_PORT_RIGHT.RECEIVE);
-
-        log.debug("allocated exception port: {any}", .{dbg.exception_port});
-
-        try self_task.insertRight(dbg.exception_port, darwin.MACH_MSG_TYPE.MAKE_SEND);
-
-        dbg.exc_port_info = try PortInfo.save(dbg.task);
-        log.debug("saved exception info for task: {any}", .{dbg.exc_port_info});
-    }
+    try dbg.startExceptionThread();
 
     try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, dbg.process.pid);
     log.debug("successfully attached with ptrace", .{});
@@ -119,4 +53,43 @@ pub fn spawn(gpa: Allocator, args: []const []const u8) !Debuggee {
 
 pub fn kill(dbg: Debuggee) void {
     std.os.ptrace.ptrace(darwin.PT_KILL, dbg.process.pid) catch {};
+}
+
+fn saveExceptionState(task: darwin.MachTask) !darwin.MachTask.PortInfo {
+    // TODO handle different platforms
+    return task.getExceptionPorts(darwin.EXC_MASK_ALL);
+}
+
+fn restoreExceptionState(task: darwin.MachTask, info: darwin.MachTask.PortInfo) !void {
+    if (info.count == 0) return;
+    var i: usize = 0;
+    while (i < info.count) : (i += 1) {
+        try task.setExceptionPorts(
+            info.masks[i],
+            info.ports[i],
+            info.behaviors[i],
+            info.flavors[i],
+        );
+    }
+}
+
+fn startExceptionThread(dbg: *Debuggee) !void {
+    dbg.task = try darwin.machTaskForPid(dbg.process.pid);
+    log.debug("Mach task: {any}", .{dbg.task});
+
+    if (dbg.task.isValid()) {
+        const self_task = darwin.machTaskForSelf();
+        dbg.exception_port = try self_task.allocatePort(darwin.MACH_PORT_RIGHT.RECEIVE);
+
+        log.debug("allocated exception port: {any}", .{dbg.exception_port});
+
+        try self_task.insertRight(dbg.exception_port, darwin.MACH_MSG_TYPE.MAKE_SEND);
+
+        dbg.exc_port_info = try saveExceptionState(dbg.task);
+        log.debug("saved exception info for task: {any}", .{dbg.exc_port_info});
+    } else return error.InvalidMachTask;
+}
+
+fn shutdownExceptionThread(dbg: Debuggee) !void {
+    try restoreExceptionState(dbg.task, dbg.exc_port_info);
 }

@@ -95,7 +95,7 @@ fn doMain(args: []const []const u8) !void {
     }
 
     var zdb = Zdb.init(gpa, .{
-        .debuggee_args = argv.items,
+        .args = argv.items,
     });
     defer zdb.deinit();
     try zdb.loop();

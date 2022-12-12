@@ -5,15 +5,15 @@ const mem = std.mem;
 const log = std.log.scoped(.zdb);
 
 const Allocator = mem.Allocator;
-const Debuggee = @import("Debuggee.zig");
+const Process = @import("Process.zig");
 
 allocator: Allocator,
 options: Options,
 
-debuggee: ?Debuggee = null,
+process: ?Process = null,
 
 pub const Options = struct {
-    debuggee_args: []const []const u8,
+    args: []const []const u8,
 };
 
 pub fn init(allocator: Allocator, options: Options) Zdb {
@@ -24,8 +24,8 @@ pub fn init(allocator: Allocator, options: Options) Zdb {
 }
 
 pub fn deinit(zdb: *Zdb) void {
-    if (zdb.debuggee) |*debuggee| {
-        debuggee.deinit();
+    if (zdb.process) |*process| {
+        process.deinit();
     }
 }
 
@@ -42,10 +42,10 @@ pub fn loop(zdb: *Zdb) !void {
 
     var last_cmd: ReplCmd = .help;
 
-    zdb.debuggee = Debuggee.spawn(gpa, zdb.options.debuggee_args) catch |err| blk: {
+    zdb.process = Process.spawn(gpa, zdb.options.args) catch |err| blk: {
         var cmd = std.ArrayList(u8).init(gpa);
         defer cmd.deinit();
-        for (zdb.options.debuggee_args) |arg| {
+        for (zdb.options.args) |arg| {
             try cmd.appendSlice(arg);
             try cmd.append(' ');
         }
@@ -78,8 +78,8 @@ pub fn loop(zdb: *Zdb) !void {
             };
             last_cmd = cmd;
             switch (cmd) {
-                .run => if (zdb.debuggee) |debuggee| {
-                    _ = debuggee;
+                .run => if (zdb.process) |process| {
+                    _ = process;
                 } else {
                     try stderr.print("No process is running\n", .{});
                     continue;
@@ -89,7 +89,7 @@ pub fn loop(zdb: *Zdb) !void {
         }
     }
 
-    if (zdb.debuggee) |debuggee| {
-        debuggee.kill();
+    if (zdb.process) |process| {
+        process.kill();
     }
 }

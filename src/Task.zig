@@ -1,6 +1,7 @@
 const Task = @This();
 
 const std = @import("std");
+const assert = std.debug.assert;
 const darwin = os.darwin;
 const log = std.log.scoped(.task);
 const os = std.os;
@@ -91,24 +92,26 @@ fn exceptionThreadFn(task: *Task) void {
     log.warn("task = {*}", .{task});
 
     const mach_task = task.mach_task.?;
-    var num_exceptions_received: u32 = 0;
-    var periodic_timeout: darwin.mach_msg_timeout_t = 0;
+    // const mach_process = task.mach_process.?;
 
     while (mach_task.isValid()) {
-        var msg = Message.empty;
+        var msg = Message.init(task.allocator);
+        defer msg.deinit();
 
         const err = err: {
-            if (num_exceptions_received > 0) {
-                // TODO
-            } else if (periodic_timeout > 0) {
-                // TODO
-            } else {
-                msg.receive(
-                    task.exception_handler.?.mach_port,
-                    darwin.MACH_RCV_MSG | darwin.MACH_RCV_INTERRUPT,
-                    0,
-                    null,
-                ) catch |err| break :err err;
+            msg.receive(
+                task.exception_handler.?.mach_port,
+                darwin.MACH_RCV_MSG | darwin.MACH_RCV_INTERRUPT,
+                0,
+                null,
+            ) catch |err| break :err err;
+
+            if (msg.catchExceptionRaise(mach_task)) {
+                assert(msg.state.task_port.port == mach_task.port);
+                log.debug("state = {any}", .{msg.state});
+                log.debug("soft ?? {?}", .{msg.state.getSoftSignal()});
+                log.debug("br ?? {}", .{msg.state.isBreakpoint()});
+                // mach_process.appendExceptionMessage(msg) catch unreachable;
             }
 
             log.debug("received: {any}", .{msg.exception_msg.hdr});

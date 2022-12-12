@@ -7,6 +7,11 @@ pub fn build(b: *std.build.Builder) void {
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
 
     const exe = b.addExecutable("zdb", "src/main.zig");
+    exe.addCSourceFiles(&.{
+        "src/mach_excUser.c",
+        "src/mach_excServer.c",
+    }, &[0][]const u8{});
+    exe.addIncludePath("src");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.entitlements = "resources/Info.plist";

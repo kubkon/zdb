@@ -5,6 +5,10 @@ const darwin = os.darwin;
 const log = std.log.scoped(.task);
 const os = std.os;
 
+const Allocator = std.mem.Allocator;
+const Message = @import("Message.zig");
+
+allocator: Allocator,
 pid: os.pid_t,
 mach_task: ?darwin.MachTask = null,
 exception_handler: ?ExceptionHandler = null,
@@ -84,5 +88,60 @@ fn restoreExceptionState(mach_task: darwin.MachTask, info: darwin.MachTask.PortI
 }
 
 fn exceptionThreadFn(task: *Task) void {
-    log.warn("task = {*}{any}", .{ task, task.* });
+    log.warn("task = {*}", .{task});
+
+    const mach_task = task.mach_task.?;
+    var num_exceptions_received: u32 = 0;
+    var periodic_timeout: darwin.mach_msg_timeout_t = 0;
+
+    while (mach_task.isValid()) {
+        var msg = Message.empty;
+
+        const err = err: {
+            if (num_exceptions_received > 0) {
+                // TODO
+            } else if (periodic_timeout > 0) {
+                // TODO
+            } else {
+                msg.receive(
+                    task.exception_handler.?.mach_port,
+                    darwin.MACH_RCV_MSG | darwin.MACH_RCV_INTERRUPT,
+                    0,
+                    null,
+                ) catch |err| break :err err;
+            }
+
+            log.debug("received: {any}", .{msg.exception_msg.hdr});
+            continue;
+        };
+
+        switch (err) {
+            error.Interrupted => {
+                if (!mach_task.isValid()) break;
+            },
+            error.TimedOut => {
+                if (!mach_task.isValid()) break;
+            },
+            else => {
+                log.err("unexpected error when receiving exceptions: {s}", .{@errorName(err)});
+            },
+        }
+    }
+}
+
+pub fn @"resume"(self: Task) !void {
+    const mach_task = self.mach_task orelse return;
+    const task_info = try mach_task.basicTaskInfo();
+
+    log.debug("resuming task, got task info: {any}", .{task_info});
+
+    if (task_info.suspend_count > 0) {
+        try mach_task.@"resume"();
+    }
+}
+
+pub fn @"suspend"(self: Task) !void {
+    const mach_task = self.mach_task orelse return;
+    log.debug("suspending task", .{});
+    try mach_task.@"suspend"();
 }

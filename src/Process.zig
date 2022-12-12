@@ -29,7 +29,7 @@ pub fn spawn(gpa: Allocator, args: []const []const u8) !Process {
     try child.spawn();
     log.debug("PID: {d}", .{child.pid});
 
-    var task = Task{ .pid = child.pid };
+    var task = Task{ .allocator = gpa, .pid = child.pid };
     task.startExceptionHandler() catch |err| {
         log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
         log.err("  killing process", .{});
@@ -47,9 +47,9 @@ pub fn spawn(gpa: Allocator, args: []const []const u8) !Process {
     };
 }
 
-// fn @"continue"(self: Process) !void {
-//     try ptrace.ptrace(ptrace.PT_CONTINUE, self.process.pid);
-// }
+pub fn @"resume"(self: Process) !void {
+    return self.task.@"resume"();
+}
 
 pub fn kill(self: Process) void {
     std.os.ptrace.ptrace(darwin.PT_KILL, self.child.pid) catch {};

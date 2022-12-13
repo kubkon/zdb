@@ -91,12 +91,44 @@ pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {
             if (msg.state.task_port.port != process.task.mach_task.?.port) continue;
 
             num_task_exceptions += 1;
-            const signo = msg.state.getSoftSignal().?; // TODO handle
-            log.debug("signo {d}", .{signo});
+
+            if (msg.state.getSoftSignal()) |signo| switch (signo) {
+                darwin.SIG.TRAP => {
+                    log.debug("received signo SIGTRAP({d})", .{signo});
+                    // TODO handle
+                    unreachable;
+                },
+                else => {
+                    log.debug("received signo {d}", .{signo});
+                },
+            };
         }
     }
 
     try process.didStop();
+
+    for (process.exception_messages.items) |msg| {
+        if (msg.state.task_port.port != process.task.mach_task.?.port) continue;
+        try process.main_thread.?.notifyException(msg.state);
+    }
+
+    try process.resumeImpl();
+}
+
+fn resumeImpl(process: *Process) !void {
+    const main_thread = process.main_thread orelse unreachable;
+
+    while (process.exception_messages.popOrNull()) |msg| {
+        // var thread_reply_signal: i32 = 0;
+        if (main_thread.port.port == msg.state.thread_port.port) {
+            log.debug("msg belongs to main thread {any}", .{main_thread.port});
+        } else {
+            log.debug("unnmatched msg {any}", .{msg});
+        }
+    }
+
+    // try process.main_thread.?.willResume();
+    // try process.@"resume"();
 }
 
 fn didStop(process: *Process) !void {

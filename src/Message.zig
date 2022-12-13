@@ -110,7 +110,7 @@ pub fn deinit(msg: *Message) void {
 
 pub const Data = struct {
     task_port: darwin.MachTask,
-    thread_port: darwin.MachTask,
+    thread_port: darwin.MachThread,
     exception_type: darwin.EXC,
     exception_data: std.ArrayList(darwin.mach_exception_data_type_t),
 
@@ -132,7 +132,7 @@ pub const Data = struct {
             data.exception_data.items.len == 2 and
             data.exception_data.items[0] == darwin.EXC_SOFT_SIGNAL)
         {
-            return @truncate(i32, data.exception_data.items[1]);
+            return @intCast(i32, data.exception_data.items[1]);
         }
         return null;
     }
@@ -140,6 +140,10 @@ pub const Data = struct {
     pub fn isBreakpoint(data: Data) bool {
         return data.exception_type == .BREAKPOINT or
             (data.exception_type == .SOFTWARE and data.exception_data.items[0] == 1);
+    }
+
+    pub fn isValid(data: Data) bool {
+        return data.task_port.isValid() and data.thread_port.isValid() and data.exception_type != .NULL;
     }
 
     pub fn appendExceptionData(
@@ -151,7 +155,7 @@ pub const Data = struct {
         var buf: [@sizeOf(darwin.mach_exception_data_type_t)]u8 = undefined;
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            const ptr = @intToPtr([*]const u8, @ptrToInt(in_data.?)) + i;
+            const ptr = @intToPtr([*]const u8, @ptrToInt(in_data.?)) + i * @sizeOf(darwin.mach_exception_data_t);
             mem.copy(u8, &buf, ptr[0..buf.len]);
             data.exception_data.appendAssumeCapacity(
                 @ptrCast(*align(1) const darwin.mach_exception_data_type_t, &buf).*,

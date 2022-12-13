@@ -6,6 +6,7 @@ const log = std.log.scoped(.message);
 const mem = std.mem;
 
 const Allocator = mem.Allocator;
+const Process = @import("Process.zig");
 
 exception_msg: MachMessage,
 reply_msg: MachMessage,
@@ -193,6 +194,40 @@ pub fn receive(
         .SUCCESS => {},
         .RCV_INTERRUPTED => return error.Interrupted,
         .RCV_TIMED_OUT => return error.TimedOut,
+        else => |err| {
+            log.err("mach_msg failed with error: {s}", .{@tagName(err)});
+            return error.Unexpected;
+        },
+    }
+}
+
+pub fn reply(msg: *Message, process: *Process, signal: i32) !void {
+    if (msg.state.getSoftSignal()) |soft_signal| {
+        var actual_signal = soft_signal;
+        const state_pid = if (process.task.mach_task.?.port == msg.state.task_port.port) blk: {
+            actual_signal = signal;
+            break :blk process.getPid();
+        } else try msg.state.task_port.pidForTask();
+
+        try std.os.ptrace.ptrace(
+            darwin.PT_THUPDATE,
+            state_pid,
+            @intToPtr([*]u8, msg.state.thread_port.port),
+            soft_signal,
+        );
+    }
+
+    switch (darwin.getMachMsgError(darwin.mach_msg(
+        &msg.reply_msg.hdr,
+        darwin.MACH_SEND_MSG | darwin.MACH_SEND_INTERRUPT,
+        msg.reply_msg.hdr.msgh_size,
+        0,
+        darwin.MACH_PORT_NULL,
+        darwin.MACH_MSG_TIMEOUT_NONE,
+        darwin.MACH_PORT_NULL,
+    ))) {
+        .SUCCESS => {},
+        .SEND_INTERRUPTED => return error.Interrupted,
         else => |err| {
             log.err("mach_msg failed with error: {s}", .{@tagName(err)});
             return error.Unexpected;

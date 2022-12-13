@@ -90,7 +90,7 @@ fn restoreExceptionState(mach_task: darwin.MachTask, info: darwin.MachTask.PortI
 }
 
 fn exceptionThreadFn(task: *Task) void {
-    log.warn("task = {*}", .{task});
+    log.debug("task = {*}", .{task});
 
     const mach_task = task.mach_task.?;
     var num_exceptions_received: u32 = 0;

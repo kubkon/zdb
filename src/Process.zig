@@ -16,6 +16,14 @@ arena: std.heap.ArenaAllocator,
 child: std.ChildProcess,
 task: Task,
 
+state: enum {
+    invalid,
+    stopped,
+    suspended,
+    running,
+    stepping,
+} = .invalid,
+
 exception_messages: std.ArrayListUnmanaged(Message) = .{},
 
 /// The main thread of execution of the debugged process. Normally,
@@ -23,16 +31,25 @@ exception_messages: std.ArrayListUnmanaged(Message) = .{},
 /// simple programs.
 main_thread: ?Thread = null,
 
-pub fn deinit(self: *Process) void {
-    self.arena.deinit();
-    self.task.deinit();
-
-    self.exception_messages.deinit(self.gpa);
+pub fn init(gpa: Allocator) Process {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    return .{
+        .gpa = gpa,
+        .arena = arena,
+        .child = undefined,
+        .task = undefined,
+    };
 }
 
-pub fn spawn(gpa: Allocator, args: []const []const u8) !Process {
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    var child = std.ChildProcess.init(args, arena.allocator());
+pub fn deinit(process: *Process) void {
+    process.arena.deinit();
+    process.task.deinit();
+
+    process.exception_messages.deinit(process.gpa);
+}
+
+pub fn spawn(process: *Process, args: []const []const u8) !void {
+    var child = std.ChildProcess.init(args, process.arena.allocator());
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
@@ -41,25 +58,18 @@ pub fn spawn(gpa: Allocator, args: []const []const u8) !Process {
 
     try child.spawn();
     log.debug("PID: {d}", .{child.pid});
+    process.child = child;
 
-    var process = Process{
-        .gpa = gpa,
-        .arena = arena,
-        .child = child,
-        .task = undefined,
-    };
-    process.task = Task{ .gpa = gpa, .process = &process };
+    process.task = Task{ .gpa = process.gpa, .process = process };
     process.task.startExceptionHandler() catch |err| {
         log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
         log.err("  killing process", .{});
-        std.os.ptrace.ptrace(darwin.PT_KILL, child.pid) catch {};
+        std.os.ptrace.ptrace(darwin.PT_KILL, child.pid, null, 0) catch {};
         return err;
     };
 
-    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, child.pid);
+    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, child.pid, null, 0);
     log.debug("successfully attached with ptrace", .{});
-
-    return process;
 }
 
 pub fn getPid(process: Process) i32 {
@@ -67,11 +77,22 @@ pub fn getPid(process: Process) i32 {
 }
 
 pub fn @"resume"(process: *Process) !void {
-    return process.task.@"resume"();
+    log.debug("resume({*})", .{process});
+    log.debug("  (state {s})", .{@tagName(process.state)});
+    switch (process.state) {
+        .stopped => { // can resume
+            return process.resumeImpl();
+        },
+        .running => { // aiready running
+        },
+        else => { // cannot continue
+            return error.CannotContinue;
+        },
+    }
 }
 
 pub fn kill(process: Process) void {
-    std.os.ptrace.ptrace(darwin.PT_KILL, process.child.pid) catch {};
+    std.os.ptrace.ptrace(darwin.PT_KILL, process.child.pid, null, 0) catch {};
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {
@@ -112,23 +133,33 @@ pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {
         try process.main_thread.?.notifyException(msg.state);
     }
 
-    try process.resumeImpl();
+    if (process.main_thread.?.shouldStop()) {
+        log.debug("HMM", .{});
+        process.state = .stopped;
+        log.debug("  (state {s})", .{@tagName(process.state)});
+    } else {
+        try process.resumeImpl();
+    }
 }
 
 fn resumeImpl(process: *Process) !void {
     const main_thread = process.main_thread orelse unreachable;
 
-    while (process.exception_messages.popOrNull()) |msg| {
-        // var thread_reply_signal: i32 = 0;
+    while (process.exception_messages.popOrNull()) |const_msg| {
+        var msg = const_msg;
+        var thread_reply_signal: i32 = 0;
         if (main_thread.port.port == msg.state.thread_port.port) {
             log.debug("msg belongs to main thread {any}", .{main_thread.port});
+            try msg.reply(process, thread_reply_signal);
         } else {
             log.debug("unnmatched msg {any}", .{msg});
         }
     }
 
-    // try process.main_thread.?.willResume();
-    // try process.@"resume"();
+    try process.main_thread.?.willResume();
+    process.state = .running;
+
+    try process.task.@"resume"();
 }
 
 fn didStop(process: *Process) !void {

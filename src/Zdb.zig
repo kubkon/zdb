@@ -10,7 +10,7 @@ const Process = @import("Process.zig");
 gpa: Allocator,
 options: Options,
 
-process: ?Process = null,
+process: Process,
 
 pub const Options = struct {
     args: []const []const u8,
@@ -20,13 +20,12 @@ pub fn init(gpa: Allocator, options: Options) Zdb {
     return .{
         .gpa = gpa,
         .options = options,
+        .process = Process.init(gpa),
     };
 }
 
 pub fn deinit(zdb: *Zdb) void {
-    if (zdb.process) |*process| {
-        process.deinit();
-    }
+    zdb.process.deinit();
 }
 
 pub fn loop(zdb: *Zdb) !void {
@@ -42,7 +41,7 @@ pub fn loop(zdb: *Zdb) !void {
 
     var last_cmd: ReplCmd = .help;
 
-    zdb.process = Process.spawn(gpa, zdb.options.args) catch |err| blk: {
+    zdb.process.spawn(zdb.options.args) catch |err| {
         var cmd = std.ArrayList(u8).init(gpa);
         defer cmd.deinit();
         for (zdb.options.args) |arg| {
@@ -50,7 +49,7 @@ pub fn loop(zdb: *Zdb) !void {
             try cmd.append(' ');
         }
         try stderr.print("\nSpawning {s} failed with error: {s}\n", .{ cmd.items, @errorName(err) });
-        break :blk null;
+        return err;
     };
 
     while (true) {
@@ -78,18 +77,13 @@ pub fn loop(zdb: *Zdb) !void {
             };
             last_cmd = cmd;
             switch (cmd) {
-                .run => if (zdb.process) |*process| {
-                    try process.@"resume"();
-                } else {
-                    try stderr.print("No process is running\n", .{});
-                    continue;
+                .run => {
+                    try zdb.process.@"resume"();
                 },
                 .help => {},
             }
         }
     }
 
-    if (zdb.process) |process| {
-        process.kill();
-    }
+    zdb.process.kill();
 }

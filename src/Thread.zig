@@ -12,11 +12,12 @@ guid: u64,
 port: darwin.MachThread,
 
 state: enum {
+    invalid,
     stopped,
     suspended,
     running,
     stepping,
-} = .running,
+} = .invalid,
 
 stop_exception: ?Message.Data = null,
 
@@ -29,6 +30,22 @@ pub fn didStop(thread: *Thread) !void {
     } else {
         thread.state = .stopped;
     }
+    log.debug("  (state {s})", .{@tagName(thread.state)});
+}
+
+pub fn shouldStop(thread: *Thread) bool {
+    switch (thread.state) {
+        .running => return false,
+        else => {
+            const exc = thread.stop_exception orelse return false;
+            return exc.isValid();
+        },
+    }
+}
+
+pub fn willResume(thread: *Thread) !void {
+    thread.state = .running;
+    thread.stop_exception = null;
 }
 
 pub fn notifyException(thread: *Thread, exception: Message.Data) !void {

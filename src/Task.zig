@@ -8,9 +8,10 @@ const os = std.os;
 
 const Allocator = std.mem.Allocator;
 const Message = @import("Message.zig");
+const Process = @import("Process.zig");
 
 allocator: Allocator,
-pid: os.pid_t,
+process: *Process,
 mach_task: ?darwin.MachTask = null,
 exception_handler: ?ExceptionHandler = null,
 
@@ -29,8 +30,8 @@ pub fn deinit(self: *Task) void {
 }
 
 pub fn startExceptionHandler(self: *Task) !void {
-    const mach_task = try darwin.machTaskForPid(self.pid);
-    log.debug("Mach task for pid {d}: {any}", .{ self.pid, mach_task });
+    const mach_task = try darwin.machTaskForPid(self.process.getPid());
+    log.debug("Mach task for pid {d}: {any}", .{ self.process.getPid(), mach_task });
     self.mach_task = mach_task;
 
     if (mach_task.isValid()) {
@@ -92,38 +93,48 @@ fn exceptionThreadFn(task: *Task) void {
     log.warn("task = {*}", .{task});
 
     const mach_task = task.mach_task.?;
-    // const mach_process = task.mach_process.?;
+    var num_exceptions_received: u32 = 0;
 
     while (mach_task.isValid()) {
         var msg = Message.init(task.allocator);
-        defer msg.deinit();
 
         const err = err: {
-            msg.receive(
-                task.exception_handler.?.mach_port,
-                darwin.MACH_RCV_MSG | darwin.MACH_RCV_INTERRUPT,
-                0,
-                null,
-            ) catch |err| break :err err;
+            if (num_exceptions_received > 0) {
+                msg.receive(
+                    task.exception_handler.?.mach_port,
+                    darwin.MACH_RCV_MSG | darwin.MACH_RCV_INTERRUPT | darwin.MACH_RCV_TIMEOUT,
+                    1,
+                    null,
+                ) catch |err| break :err err;
+            } else {
+                msg.receive(
+                    task.exception_handler.?.mach_port,
+                    darwin.MACH_RCV_MSG | darwin.MACH_RCV_INTERRUPT,
+                    0,
+                    null,
+                ) catch |err| break :err err;
+            }
 
             if (msg.catchExceptionRaise(mach_task)) {
                 assert(msg.state.task_port.port == mach_task.port);
-                log.debug("state = {any}", .{msg.state});
-                log.debug("soft ?? {?}", .{msg.state.getSoftSignal()});
-                log.debug("br ?? {}", .{msg.state.isBreakpoint()});
-                // mach_process.appendExceptionMessage(msg) catch unreachable;
+                num_exceptions_received += 1;
+                task.process.appendExceptionMessage(msg) catch unreachable;
             }
-
-            log.debug("received: {any}", .{msg.exception_msg.hdr});
             continue;
         };
+        defer msg.deinit();
 
         switch (err) {
             error.Interrupted => {
                 if (!mach_task.isValid()) break;
             },
             error.TimedOut => {
-                if (!mach_task.isValid()) break;
+                if (num_exceptions_received > 0) {
+                    num_exceptions_received = 0;
+                    task.process.notifyExceptionMessageBundleComplete() catch unreachable;
+
+                    if (!mach_task.isValid()) break;
+                }
             },
             else => {
                 log.err("unexpected error when receiving exceptions: {s}", .{@errorName(err)});

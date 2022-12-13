@@ -78,7 +78,7 @@ pub fn loop(zdb: *Zdb) !void {
             };
             last_cmd = cmd;
             switch (cmd) {
-                .run => if (zdb.process) |process| {
+                .run => if (zdb.process) |*process| {
                     try process.@"resume"();
                 } else {
                     try stderr.print("No process is running\n", .{});

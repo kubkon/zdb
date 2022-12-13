@@ -1,6 +1,7 @@
 const Process = @This();
 
 const std = @import("std");
+const assert = std.debug.assert;
 const darwin = std.os.darwin;
 const log = std.log.scoped(.process);
 const mem = std.mem;
@@ -8,7 +9,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const Message = @import("Message.zig");
 const Task = @import("Task.zig");
-const ThreadList = @import("ThreadList.zig");
+const Thread = @import("Thread.zig");
 
 gpa: Allocator,
 arena: std.heap.ArenaAllocator,
@@ -16,9 +17,11 @@ child: std.ChildProcess,
 task: Task,
 
 exception_messages: std.ArrayListUnmanaged(Message) = .{},
-exception_messages_mutex: std.Thread.Mutex = .{},
 
-thread_list: ThreadList = .{},
+/// The main thread of execution of the debugged process. Normally,
+/// this will be a thread list, but for now, we are dealing with single-threaded
+/// simple programs.
+main_thread: ?Thread = null,
 
 pub fn deinit(self: *Process) void {
     self.arena.deinit();
@@ -64,9 +67,6 @@ pub fn getPid(process: Process) i32 {
 }
 
 pub fn @"resume"(process: *Process) !void {
-    process.exception_messages_mutex.lock();
-    defer process.exception_messages_mutex.unlock();
-
     return process.task.@"resume"();
 }
 
@@ -75,20 +75,13 @@ pub fn kill(process: Process) void {
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {
-    process.exception_messages_mutex.lock();
-    defer process.exception_messages_mutex.unlock();
-
     if (process.exception_messages.items.len == 0) {
         try process.task.@"suspend"();
     }
-
     try process.exception_messages.append(process.gpa, msg);
 }
 
 pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {
-    process.exception_messages_mutex.lock();
-    defer process.exception_messages_mutex.unlock();
-
     log.debug("notifyExceptionMessageBundleComplete", .{});
 
     if (process.exception_messages.items.len > 0) {
@@ -101,7 +94,31 @@ pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {
             const signo = msg.state.getSoftSignal().?; // TODO handle
             log.debug("signo {d}", .{signo});
         }
+    }
 
-        try process.thread_list.processDidStop(process.gpa, process);
+    try process.didStop();
+}
+
+fn didStop(process: *Process) !void {
+    try process.updateMainThread(true);
+    try process.main_thread.?.didStop();
+}
+
+fn updateMainThread(process: *Process, update: bool) !void {
+    const curr_threads = try process.task.mach_task.?.getThreads();
+    defer curr_threads.deinit();
+
+    assert(curr_threads.buf.len == 1); // TODO we do not yet know how to handle multi-threading
+
+    const thread = curr_threads.buf[0];
+    const info = try thread.getIdentifierInfo();
+
+    const curr_main_thread = process.main_thread orelse {
+        process.main_thread = Thread{ .guid = info.thread_id, .port = thread };
+        return;
+    };
+
+    if (update and curr_main_thread.guid != info.thread_id) {
+        process.main_thread = Thread{ .guid = info.thread_id, .port = thread };
     }
 }

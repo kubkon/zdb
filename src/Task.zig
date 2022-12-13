@@ -10,7 +10,7 @@ const Allocator = std.mem.Allocator;
 const Message = @import("Message.zig");
 const Process = @import("Process.zig");
 
-allocator: Allocator,
+gpa: Allocator,
 process: *Process,
 mach_task: ?darwin.MachTask = null,
 exception_handler: ?ExceptionHandler = null,
@@ -96,7 +96,7 @@ fn exceptionThreadFn(task: *Task) void {
     var num_exceptions_received: u32 = 0;
 
     while (mach_task.isValid()) {
-        var msg = Message.init(task.allocator);
+        var msg = Message.init(task.gpa);
 
         const err = err: {
             if (num_exceptions_received > 0) {

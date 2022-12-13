@@ -7,7 +7,7 @@ const log = std.log.scoped(.zdb);
 const Allocator = mem.Allocator;
 const Process = @import("Process.zig");
 
-allocator: Allocator,
+gpa: Allocator,
 options: Options,
 
 process: ?Process = null,
@@ -16,9 +16,9 @@ pub const Options = struct {
     args: []const []const u8,
 };
 
-pub fn init(allocator: Allocator, options: Options) Zdb {
+pub fn init(gpa: Allocator, options: Options) Zdb {
     return .{
-        .allocator = allocator,
+        .gpa = gpa,
         .options = options,
     };
 }
@@ -30,7 +30,7 @@ pub fn deinit(zdb: *Zdb) void {
 }
 
 pub fn loop(zdb: *Zdb) !void {
-    const gpa = zdb.allocator;
+    const gpa = zdb.gpa;
     const stdin = std.io.getStdIn().reader();
     const stderr = std.io.getStdErr().writer();
     var repl_buf: [1024]u8 = undefined;

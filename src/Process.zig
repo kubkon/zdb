@@ -13,7 +13,7 @@ const Thread = @import("Thread.zig");
 
 gpa: Allocator,
 arena: std.heap.ArenaAllocator,
-child: std.ChildProcess,
+child_pid: i32,
 task: Task,
 
 state: enum {
@@ -36,7 +36,7 @@ pub fn init(gpa: Allocator) Process {
     return .{
         .gpa = gpa,
         .arena = arena,
-        .child = undefined,
+        .child_pid = -1,
         .task = undefined,
     };
 }
@@ -49,7 +49,24 @@ pub fn deinit(process: *Process) void {
 }
 
 pub fn spawn(process: *Process, args: []const []const u8) !void {
-    var child = std.ChildProcess.init(args, process.arena.allocator());
+    process.child_pid = try spawnPosixSpawn(process.arena.allocator(), args);
+    // process.child_pid = try spawnFork(process.arena.allocator(), args);
+
+    process.task = Task{ .gpa = process.gpa, .process = process };
+    process.task.startExceptionHandler() catch |err| {
+        log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
+        log.err("  killing process", .{});
+        std.os.ptrace.ptrace(darwin.PT_KILL, process.child_pid, null, 0) catch {};
+        return err;
+    };
+
+    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, process.child_pid, null, 0);
+    log.debug("successfully attached with ptrace", .{});
+}
+
+/// TODO rewrite with in-house wrapper to posix_spawnp
+fn spawnPosixSpawn(arena: Allocator, args: []const []const u8) !i32 {
+    var child = std.ChildProcess.init(args, arena);
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
@@ -58,22 +75,14 @@ pub fn spawn(process: *Process, args: []const []const u8) !void {
 
     try child.spawn();
     log.debug("PID: {d}", .{child.id});
-    process.child = child;
 
-    process.task = Task{ .gpa = process.gpa, .process = process };
-    process.task.startExceptionHandler() catch |err| {
-        log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
-        log.err("  killing process", .{});
-        std.os.ptrace.ptrace(darwin.PT_KILL, child.id, null, 0) catch {};
-        return err;
-    };
-
-    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, child.id, null, 0);
-    log.debug("successfully attached with ptrace", .{});
+    return child.id;
 }
 
-pub fn getPid(process: Process) i32 {
-    return process.child.id;
+fn spawnFork(arena: Allocator, args: []const []const u8) !i32 {
+    _ = arena;
+    _ = args;
+    return error.Todo;
 }
 
 pub fn @"resume"(process: *Process) !void {
@@ -92,7 +101,7 @@ pub fn @"resume"(process: *Process) !void {
 }
 
 pub fn kill(process: Process) void {
-    std.os.ptrace.ptrace(darwin.PT_KILL, process.child.id, null, 0) catch {};
+    std.os.ptrace.ptrace(darwin.PT_KILL, process.child_pid, null, 0) catch {};
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {

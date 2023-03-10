@@ -2,18 +2,21 @@ const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
-    const mode = b.standardReleaseOptions();
+    const mode = b.standardOptimizeOption(.{});
 
     const enable_logging = b.option(bool, "log", "Whether to enable logging") orelse false;
 
-    const exe = b.addExecutable("zdb", "src/main.zig");
+    const exe = b.addExecutable(.{
+        .name = "zdb",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = mode,
+    });
     exe.addCSourceFiles(&.{
         "src/mach_excUser.c",
         "src/mach_excServer.c",
     }, &[0][]const u8{});
     exe.addIncludePath("src");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
     exe.entitlements = "resources/Info.plist";
     exe.install();
 
@@ -29,11 +32,4 @@ pub fn build(b: *std.build.Builder) void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-    const exe_tests = b.addTest("src/main.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
-
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
 }

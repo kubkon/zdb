@@ -57,23 +57,23 @@ pub fn spawn(process: *Process, args: []const []const u8) !void {
     child.start_suspended = true;
 
     try child.spawn();
-    log.debug("PID: {d}", .{child.pid});
+    log.debug("PID: {d}", .{child.id});
     process.child = child;
 
     process.task = Task{ .gpa = process.gpa, .process = process };
     process.task.startExceptionHandler() catch |err| {
         log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
         log.err("  killing process", .{});
-        std.os.ptrace.ptrace(darwin.PT_KILL, child.pid, null, 0) catch {};
+        std.os.ptrace.ptrace(darwin.PT_KILL, child.id, null, 0) catch {};
         return err;
     };
 
-    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, child.pid, null, 0);
+    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, child.id, null, 0);
     log.debug("successfully attached with ptrace", .{});
 }
 
 pub fn getPid(process: Process) i32 {
-    return process.child.pid;
+    return process.child.id;
 }
 
 pub fn @"resume"(process: *Process) !void {
@@ -92,7 +92,7 @@ pub fn @"resume"(process: *Process) !void {
 }
 
 pub fn kill(process: Process) void {
-    std.os.ptrace.ptrace(darwin.PT_KILL, process.child.pid, null, 0) catch {};
+    std.os.ptrace.ptrace(darwin.PT_KILL, process.child.id, null, 0) catch {};
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {

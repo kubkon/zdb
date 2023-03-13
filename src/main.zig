@@ -94,7 +94,7 @@ fn doMain(args: []const []const u8) !void {
         } else try argv.append(arg);
     }
 
-    var zdb = Zdb.init(gpa, .{
+    var zdb = try Zdb.init(gpa, .{
         .args = argv.items,
     });
     defer zdb.deinit();

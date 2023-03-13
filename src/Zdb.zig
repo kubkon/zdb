@@ -5,27 +5,26 @@ const mem = std.mem;
 const log = std.log.scoped(.zdb);
 
 const Allocator = mem.Allocator;
-const Process = @import("Process.zig");
+const Target = @import("Target.zig");
 
 gpa: Allocator,
 options: Options,
-
-process: Process,
+target: Target,
 
 pub const Options = struct {
     args: []const []const u8,
 };
 
-pub fn init(gpa: Allocator, options: Options) Zdb {
+pub fn init(gpa: Allocator, options: Options) !Zdb {
     return .{
         .gpa = gpa,
         .options = options,
-        .process = Process.init(gpa),
+        .target = try Target.init(gpa),
     };
 }
 
 pub fn deinit(zdb: *Zdb) void {
-    zdb.process.deinit();
+    zdb.target.deinit();
 }
 
 pub fn loop(zdb: *Zdb) !void {
@@ -41,7 +40,7 @@ pub fn loop(zdb: *Zdb) !void {
 
     var last_cmd: ReplCmd = .help;
 
-    zdb.process.spawn(zdb.options.args) catch |err| {
+    zdb.target.spawn(zdb.options.args) catch |err| {
         var cmd = std.ArrayList(u8).init(gpa);
         defer cmd.deinit();
         for (zdb.options.args) |arg| {
@@ -78,12 +77,12 @@ pub fn loop(zdb: *Zdb) !void {
             last_cmd = cmd;
             switch (cmd) {
                 .run => {
-                    try zdb.process.@"resume"();
+                    try zdb.target.@"resume"();
                 },
                 .help => {},
             }
         }
     }
 
-    zdb.process.kill();
+    try zdb.target.kill();
 }

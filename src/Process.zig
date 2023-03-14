@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const darwin = std.os.darwin;
 const log = std.log.scoped(.process);
 const mem = std.mem;
+const ps = @import("posix_spawn.zig");
 
 const Allocator = mem.Allocator;
 const Message = @import("Message.zig");
@@ -64,19 +65,23 @@ pub fn spawn(process: *Process, args: []const []const u8) !void {
     log.debug("successfully attached with ptrace", .{});
 }
 
-/// TODO rewrite with in-house wrapper to posix_spawnp
+/// Spawn the child process using posix_spawn syscall.
+/// TODO handle piping, etc.
 fn spawnPosixSpawn(arena: Allocator, args: []const []const u8) !i32 {
-    var child = std.ChildProcess.init(args, arena);
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-    child.disable_aslr = true;
-    child.start_suspended = true;
+    var attr = try ps.Attr.init();
+    defer attr.deinit();
+    var flags: u16 = darwin.POSIX_SPAWN_SETSIGDEF |
+        darwin.POSIX_SPAWN_SETSIGMASK |
+        darwin._POSIX_SPAWN_DISABLE_ASLR |
+        darwin.POSIX_SPAWN_START_SUSPENDED;
+    try attr.set(flags);
 
-    try child.spawn();
-    log.debug("PID: {d}", .{child.id});
+    const args_buf = try arena.allocSentinel(?[*:0]u8, args.len, null);
+    for (args, 0..) |arg, i| args_buf[i] = (try arena.dupeZ(u8, arg)).ptr;
 
-    return child.id;
+    const pid = try ps.spawn(args[0], null, attr, args_buf, std.c.environ);
+    log.debug("PID: {d}", .{pid});
+    return pid;
 }
 
 fn spawnFork(arena: Allocator, args: []const []const u8) !i32 {

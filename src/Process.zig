@@ -80,7 +80,7 @@ fn spawnPosixSpawn(arena: Allocator, args: []const []const u8) !i32 {
     for (args, 0..) |arg, i| args_buf[i] = (try arena.dupeZ(u8, arg)).ptr;
 
     const pid = try ps.spawn(args[0], null, attr, args_buf, std.c.environ);
-    log.debug("PID: {d}", .{pid});
+    log.debug("child PID: {d}", .{pid});
     return pid;
 }
 
@@ -148,7 +148,6 @@ pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {
     }
 
     if (process.main_thread.?.shouldStop()) {
-        log.debug("HMM", .{});
         process.state = .stopped;
         log.debug("  (state {s})", .{@tagName(process.state)});
     } else {

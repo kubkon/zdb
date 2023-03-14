@@ -12,12 +12,18 @@ pub fn build(b: *std.build.Builder) void {
         .target = target,
         .optimize = mode,
     });
-    exe.addCSourceFiles(&.{
-        "src/mach_excUser.c",
-        "src/mach_excServer.c",
-    }, &[0][]const u8{});
-    exe.addIncludePath("src");
-    exe.entitlements = "resources/Info.plist";
+
+    switch (target.getOsTag()) {
+        .macos => {
+            exe.addCSourceFiles(&.{
+                "src/macos/mach_excUser.c",
+                "src/macos/mach_excServer.c",
+            }, &[0][]const u8{});
+            exe.addIncludePath("src");
+            exe.entitlements = "resources/Info.plist";
+        },
+        else => {},
+    }
     exe.install();
 
     const exe_opts = b.addOptions();

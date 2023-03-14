@@ -206,7 +206,7 @@ pub fn reply(msg: *Message, process: *Process, signal: i32) !void {
         var actual_signal = soft_signal;
         const state_pid = if (process.task.mach_task.?.port == msg.state.task_port.port) blk: {
             actual_signal = signal;
-            break :blk process.child_pid;
+            break :blk process.childPid();
         } else try msg.state.task_port.pidForTask();
 
         try std.os.ptrace.ptrace(

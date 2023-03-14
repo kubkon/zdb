@@ -30,8 +30,8 @@ pub fn deinit(self: *Task) void {
 }
 
 pub fn startExceptionHandler(self: *Task) !void {
-    const mach_task = try darwin.machTaskForPid(self.process.child_pid);
-    log.debug("Mach task for pid {d}: {any}", .{ self.process.child_pid, mach_task });
+    const mach_task = try darwin.machTaskForPid(self.process.childPid());
+    log.debug("Mach task for pid {d}: {any}", .{ self.process.childPid(), mach_task });
     self.mach_task = mach_task;
 
     if (mach_task.isValid()) {

@@ -1,6 +1,7 @@
 const Zdb = @This();
 
 const std = @import("std");
+const builtin = @import("builtin");
 const mem = std.mem;
 const log = std.log.scoped(.zdb);
 
@@ -10,17 +11,24 @@ const Process = @import("Process.zig");
 gpa: Allocator,
 options: Options,
 
-process: Process,
+process: *Process,
 
 pub const Options = struct {
     args: []const []const u8,
 };
 
-pub fn init(gpa: Allocator, options: Options) Zdb {
+pub fn init(gpa: Allocator, options: Options) !Zdb {
+    const process = switch (builtin.os.tag) {
+        .macos => try Process.new(gpa, .macos),
+        else => {
+            log.err("zdb for host {s} is currently unimplemented", .{@tagName(builtin.os.tag)});
+            return error.Unimplemented;
+        },
+    };
     return .{
         .gpa = gpa,
         .options = options,
-        .process = Process.init(gpa),
+        .process = process,
     };
 }
 

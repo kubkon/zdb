@@ -6,29 +6,26 @@ const mem = std.mem;
 const log = std.log.scoped(.zdb);
 
 const Allocator = mem.Allocator;
-const Process = @import("Process.zig");
+
+const Process = switch (builtin.os.tag) {
+    .macos => @import("macos/Process.zig"),
+    else => @compileError("OS is currently unsupported"),
+};
 
 gpa: Allocator,
 options: Options,
 
-process: *Process,
+process: Process,
 
 pub const Options = struct {
     args: []const []const u8,
 };
 
 pub fn init(gpa: Allocator, options: Options) !Zdb {
-    const process = switch (builtin.os.tag) {
-        .macos => try Process.new(gpa, .macos),
-        else => {
-            log.err("zdb for host {s} is currently unimplemented", .{@tagName(builtin.os.tag)});
-            return error.Unimplemented;
-        },
-    };
     return .{
         .gpa = gpa,
         .options = options,
-        .process = process,
+        .process = Process.init(gpa),
     };
 }
 

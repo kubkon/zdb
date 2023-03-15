@@ -8,14 +8,13 @@ const mem = std.mem;
 const ps = @import("posix_spawn.zig");
 
 const Allocator = mem.Allocator;
-const BaseProcess = @import("../Process.zig");
 const Message = @import("Message.zig");
 const Task = @import("Task.zig");
 const Thread = @import("Thread.zig");
 
-pub const base_tag = BaseProcess.Tag.macos;
-
-base: BaseProcess,
+gpa: Allocator,
+arena: std.heap.ArenaAllocator,
+child_pid: std.os.pid_t,
 task: Task,
 
 state: enum {
@@ -33,56 +32,41 @@ exception_messages: std.ArrayListUnmanaged(Message) = .{},
 /// simple programs.
 main_thread: ?Thread = null,
 
-pub fn new(gpa_alloc: Allocator, arena_alloc: std.heap.ArenaAllocator) !*Process {
-    const process = try gpa_alloc.create(Process);
-    process.* = .{
-        .base = .{
-            .gpa = gpa_alloc,
-            .arena = arena_alloc,
-            .child_pid = -1,
-            .tag = .macos,
-        },
+pub fn init(gpa: Allocator) Process {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    return .{
+        .gpa = gpa,
+        .arena = arena,
+        .child_pid = -1,
         .task = undefined,
     };
-    return process;
 }
 
 pub fn deinit(process: *Process) void {
+    process.arena.deinit();
     process.task.deinit();
-    process.exception_messages.deinit(process.gpa());
-}
-
-pub fn gpa(process: *Process) Allocator {
-    return process.base.gpa;
-}
-
-pub fn arena(process: *Process) Allocator {
-    return process.base.arena.allocator();
-}
-
-pub fn childPid(process: *const Process) std.os.pid_t {
-    return process.base.child_pid;
+    process.exception_messages.deinit(process.gpa);
 }
 
 pub fn spawn(process: *Process, args: []const []const u8) !void {
-    process.base.child_pid = try spawnPosixSpawn(process.arena(), args);
-    // process.child_pid = try spawnFork(process.arena(), args);
+    process.child_pid = try spawnPosixSpawn(process.arena.allocator(), args);
+    // process.child_pid = try spawnFork(process.arena.allocator(), args);
 
-    process.task = Task{ .gpa = process.gpa(), .process = process };
+    process.task = Task{ .gpa = process.gpa, .process = process };
     process.task.startExceptionHandler() catch |err| {
         log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
         log.err("  killing process", .{});
-        std.os.ptrace(darwin.PT_KILL, process.childPid(), null, 0) catch {};
+        std.os.ptrace(darwin.PT_KILL, process.child_pid, null, 0) catch {};
         return err;
     };
 
-    try std.os.ptrace(darwin.PT_ATTACHEXC, process.childPid(), null, 0);
+    try std.os.ptrace(darwin.PT_ATTACHEXC, process.child_pid, null, 0);
     log.debug("successfully attached with ptrace", .{});
 }
 
 /// Spawn the child process using posix_spawn syscall.
 /// TODO handle piping, etc.
-fn spawnPosixSpawn(arena_alloc: Allocator, args: []const []const u8) !std.os.pid_t {
+fn spawnPosixSpawn(arena: Allocator, args: []const []const u8) !std.os.pid_t {
     var attr = try ps.Attr.init();
     defer attr.deinit();
     var flags: u16 = darwin.POSIX_SPAWN_SETSIGDEF |
@@ -91,16 +75,16 @@ fn spawnPosixSpawn(arena_alloc: Allocator, args: []const []const u8) !std.os.pid
         darwin.POSIX_SPAWN_START_SUSPENDED;
     try attr.set(flags);
 
-    const args_buf = try arena_alloc.allocSentinel(?[*:0]u8, args.len, null);
-    for (args, 0..) |arg, i| args_buf[i] = (try arena_alloc.dupeZ(u8, arg)).ptr;
+    const args_buf = try arena.allocSentinel(?[*:0]u8, args.len, null);
+    for (args, 0..) |arg, i| args_buf[i] = (try arena.dupeZ(u8, arg)).ptr;
 
     const pid = try ps.spawn(args[0], null, attr, args_buf, std.c.environ);
     log.debug("child PID: {d}", .{pid});
     return pid;
 }
 
-fn spawnFork(arena_alloc: Allocator, args: []const []const u8) !i32 {
-    _ = arena_alloc;
+fn spawnFork(arena: Allocator, args: []const []const u8) !i32 {
+    _ = arena;
     _ = args;
     return error.Todo;
 }
@@ -121,14 +105,14 @@ pub fn @"resume"(process: *Process) !void {
 }
 
 pub fn kill(process: Process) void {
-    std.os.ptrace(darwin.PT_KILL, process.childPid(), null, 0) catch {};
+    std.os.ptrace(darwin.PT_KILL, process.child_pid, null, 0) catch {};
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {
     if (process.exception_messages.items.len == 0) {
         try process.task.@"suspend"();
     }
-    try process.exception_messages.append(process.gpa(), msg);
+    try process.exception_messages.append(process.gpa, msg);
 }
 
 pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {

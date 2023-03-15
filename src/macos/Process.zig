@@ -72,11 +72,11 @@ pub fn spawn(process: *Process, args: []const []const u8) !void {
     process.task.startExceptionHandler() catch |err| {
         log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
         log.err("  killing process", .{});
-        std.os.ptrace.ptrace(darwin.PT_KILL, process.childPid(), null, 0) catch {};
+        std.os.ptrace(darwin.PT_KILL, process.childPid(), null, 0) catch {};
         return err;
     };
 
-    try std.os.ptrace.ptrace(darwin.PT_ATTACHEXC, process.childPid(), null, 0);
+    try std.os.ptrace(darwin.PT_ATTACHEXC, process.childPid(), null, 0);
     log.debug("successfully attached with ptrace", .{});
 }
 
@@ -121,7 +121,7 @@ pub fn @"resume"(process: *Process) !void {
 }
 
 pub fn kill(process: Process) void {
-    std.os.ptrace.ptrace(darwin.PT_KILL, process.childPid(), null, 0) catch {};
+    std.os.ptrace(darwin.PT_KILL, process.childPid(), null, 0) catch {};
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {

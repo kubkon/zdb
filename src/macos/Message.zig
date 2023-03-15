@@ -209,7 +209,7 @@ pub fn reply(msg: *Message, process: *Process, signal: i32) !void {
             break :blk process.childPid();
         } else try msg.state.task_port.pidForTask();
 
-        try std.os.ptrace.ptrace(
+        try std.os.ptrace(
             darwin.PT_THUPDATE,
             state_pid,
             @intToPtr([*]u8, msg.state.thread_port.port),

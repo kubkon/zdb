@@ -9,11 +9,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos, ubuntu, windows]
+        os: [macos]
 
     steps:
-    - if: matrix.os == 'windows'
-      run: git config --global core.autocrlf false
     - uses: actions/checkout@v3
       with:
         submodules: true

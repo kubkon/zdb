@@ -56,11 +56,11 @@ pub fn spawn(process: *Process, args: []const []const u8) !void {
     process.task.startExceptionHandler() catch |err| {
         log.err("failed to start exception handler with error: {s}", .{@errorName(err)});
         log.err("  killing process", .{});
-        std.os.ptrace(darwin.PT_KILL, process.child_pid, null, 0) catch {};
+        std.os.ptrace(darwin.PT.KILL, process.child_pid, 0, 0) catch {};
         return err;
     };
 
-    try std.os.ptrace(darwin.PT_ATTACHEXC, process.child_pid, null, 0);
+    try std.os.ptrace(darwin.PT.ATTACHEXC, process.child_pid, 0, 0);
     log.debug("successfully attached with ptrace", .{});
 }
 
@@ -69,10 +69,10 @@ pub fn spawn(process: *Process, args: []const []const u8) !void {
 fn spawnPosixSpawn(arena: Allocator, args: []const []const u8) !std.os.pid_t {
     var attr = try ps.Attr.init();
     defer attr.deinit();
-    var flags: u16 = darwin.POSIX_SPAWN_SETSIGDEF |
-        darwin.POSIX_SPAWN_SETSIGMASK |
-        darwin._POSIX_SPAWN_DISABLE_ASLR |
-        darwin.POSIX_SPAWN_START_SUSPENDED;
+    var flags: u16 = darwin.POSIX_SPAWN.SETSIGDEF |
+        darwin.POSIX_SPAWN.SETSIGMASK |
+        darwin.POSIX_SPAWN.DISABLE_ASLR |
+        darwin.POSIX_SPAWN.START_SUSPENDED;
     try attr.set(flags);
 
     const args_buf = try arena.allocSentinel(?[*:0]u8, args.len, null);
@@ -105,7 +105,7 @@ pub fn @"resume"(process: *Process) !void {
 }
 
 pub fn kill(process: Process) void {
-    std.os.ptrace(darwin.PT_KILL, process.child_pid, null, 0) catch {};
+    std.os.ptrace(darwin.PT.KILL, process.child_pid, 0, 0) catch {};
 }
 
 pub fn appendExceptionMessage(process: *Process, msg: Message) !void {
@@ -126,7 +126,7 @@ pub fn notifyExceptionMessageBundleComplete(process: *Process) !void {
 
             num_task_exceptions += 1;
 
-            if (msg.state.getSoftSignal()) |signo| switch (signo) {
+            if (try msg.state.getSoftSignal()) |signo| switch (signo) {
                 darwin.SIG.TRAP => {
                     log.debug("received signo SIGTRAP({d})", .{signo});
                     // TODO handle
@@ -159,7 +159,7 @@ fn resumeImpl(process: *Process) !void {
 
     while (process.exception_messages.popOrNull()) |const_msg| {
         var msg = const_msg;
-        var thread_reply_signal: i32 = 0;
+        var thread_reply_signal: usize = 0;
         if (main_thread.port.port == msg.state.thread_port.port) {
             log.debug("msg belongs to main thread {any}", .{main_thread.port});
             try msg.reply(process, thread_reply_signal);

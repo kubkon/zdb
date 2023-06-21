@@ -24,13 +24,13 @@ pub fn build(b: *std.build.Builder) void {
         },
         else => {},
     }
-    exe.install();
+    b.installArtifact(exe);
 
     const exe_opts = b.addOptions();
     exe.addOptions("build_options", exe_opts);
     exe_opts.addOption(bool, "enable_logging", enable_logging);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);

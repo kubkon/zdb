@@ -3,6 +3,7 @@ const Message = @import("Message.zig");
 const std = @import("std");
 const darwin = std.os.darwin;
 const log = std.log.scoped(.message);
+const math = std.math;
 const mem = std.mem;
 
 const Allocator = mem.Allocator;
@@ -34,7 +35,7 @@ export fn catch_mach_exception_raise_state(
     _ = old_state_cnt;
     _ = new_state;
     _ = new_state_cnt;
-    return @enumToInt(darwin.KernE.FAILURE);
+    return @intFromEnum(darwin.KernE.FAILURE);
 }
 
 export fn catch_mach_exception_raise_state_identity(
@@ -61,7 +62,7 @@ export fn catch_mach_exception_raise_state_identity(
     _ = old_state_cnt;
     _ = new_state;
     _ = new_state_cnt;
-    return @enumToInt(darwin.KernE.FAILURE);
+    return @intFromEnum(darwin.KernE.FAILURE);
 }
 
 export fn catch_mach_exception_raise(
@@ -74,20 +75,20 @@ export fn catch_mach_exception_raise(
 ) darwin.kern_return_t {
     _ = exc_port;
 
-    const msg = global_msg orelse return @enumToInt(darwin.KernE.FAILURE);
+    const msg = global_msg orelse return @intFromEnum(darwin.KernE.FAILURE);
     msg.exception_type = .NULL;
     msg.exception_data.clearRetainingCapacity();
 
     if (task_port == msg.task_port.port) {
         msg.task_port = .{ .port = task_port };
         msg.thread_port = .{ .port = thread_port };
-        msg.exception_type = @intToEnum(darwin.EXC, exc_type);
-        msg.appendExceptionData(exc_data, exc_data_count) catch return @enumToInt(darwin.KernE.FAILURE);
-        return @enumToInt(darwin.KernE.SUCCESS);
+        msg.exception_type = @enumFromInt(darwin.EXC, exc_type);
+        msg.appendExceptionData(exc_data, exc_data_count) catch return @intFromEnum(darwin.KernE.FAILURE);
+        return @intFromEnum(darwin.KernE.SUCCESS);
     }
 
     // TODO handle port changes
-    return @enumToInt(darwin.KernE.FAILURE);
+    return @intFromEnum(darwin.KernE.FAILURE);
 }
 
 var global_msg: ?*Data = null;
@@ -128,12 +129,12 @@ pub const Data = struct {
         data.exception_data.deinit();
     }
 
-    pub fn getSoftSignal(data: Data) ?i32 {
+    pub fn getSoftSignal(data: Data) !?usize {
         if (data.exception_type == .SOFTWARE and
             data.exception_data.items.len == 2 and
             data.exception_data.items[0] == darwin.EXC_SOFT_SIGNAL)
         {
-            return @intCast(i32, data.exception_data.items[1]);
+            return math.cast(usize, data.exception_data.items[1]) orelse error.Overflow;
         }
         return null;
     }
@@ -156,7 +157,7 @@ pub const Data = struct {
         var buf: [@sizeOf(darwin.mach_exception_data_type_t)]u8 = undefined;
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            const ptr = @intToPtr([*]const u8, @ptrToInt(in_data.?)) + i * @sizeOf(darwin.mach_exception_data_t);
+            const ptr = @ptrFromInt([*]const u8, @intFromPtr(in_data.?)) + i * @sizeOf(darwin.mach_exception_data_t);
             mem.copy(u8, &buf, ptr[0..buf.len]);
             data.exception_data.appendAssumeCapacity(
                 @ptrCast(*align(1) const darwin.mach_exception_data_type_t, &buf).*,
@@ -201,8 +202,8 @@ pub fn receive(
     }
 }
 
-pub fn reply(msg: *Message, process: *Process, signal: i32) !void {
-    if (msg.state.getSoftSignal()) |soft_signal| {
+pub fn reply(msg: *Message, process: *Process, signal: usize) !void {
+    if (try msg.state.getSoftSignal()) |soft_signal| {
         var actual_signal = soft_signal;
         const state_pid = if (process.task.mach_task.?.port == msg.state.task_port.port) blk: {
             actual_signal = signal;
@@ -210,9 +211,9 @@ pub fn reply(msg: *Message, process: *Process, signal: i32) !void {
         } else try msg.state.task_port.pidForTask();
 
         try std.os.ptrace(
-            darwin.PT_THUPDATE,
+            darwin.PT.THUPDATE,
             state_pid,
-            @intToPtr([*]u8, msg.state.thread_port.port),
+            msg.state.thread_port.port,
             soft_signal,
         );
     }
